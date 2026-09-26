@@ -246,6 +246,40 @@ function fmtApprox(n){
 }
 function fmtChoice(c){ return typeof c === 'number' ? fmtApprox(c) : c; }
 
+// クイズの2択で、金額を丸めた結果どちらも同じ表示(例:「約1.7億円」同士)になってしまう問題への対処。
+// 表示が重複する場合は、両方の選択肢を少しずつ精度を上げて再フォーマットし、必ず見た目が異なるようにする。
+function fmtApproxAtLevel(n, level){
+  n = Math.round(n);
+  const sign = n < 0 ? '-' : '';
+  n = Math.abs(n);
+  if(n >= 100000000){
+    const oku = n / 100000000;
+    if(oku < 1000){
+      const decimals = 1 + level;
+      return sign + '約' + oku.toLocaleString('ja-JP', {minimumFractionDigits:decimals, maximumFractionDigits:decimals}) + '億円';
+    }
+    return sign + '約' + Math.round(oku).toLocaleString() + '億円';
+  }
+  if(n >= 10000){
+    const man = n / 10000;
+    if(level === 0) return sign + '約' + Math.round(man).toLocaleString() + '万円';
+    return sign + '約' + man.toLocaleString('ja-JP', {minimumFractionDigits:level, maximumFractionDigits:level}) + '万円';
+  }
+  return sign + '約' + n.toLocaleString() + '円';
+}
+function fmtChoicesDistinct(choices){
+  if(!choices.some(c => typeof c === 'number')) return choices.map(String);
+  let result, level = 0;
+  do {
+    result = choices.map(c => typeof c === 'number' ? fmtApproxAtLevel(c, level) : c);
+    level++;
+  } while(new Set(result).size < result.length && level < 8);
+  if(new Set(result).size < result.length){
+    result = choices.map(c => typeof c === 'number' ? (Math.round(c).toLocaleString() + '円') : c);
+  }
+  return result;
+}
+
 let state = { view:'home' };
 
 function render(){
@@ -505,24 +539,28 @@ function renderQuiz(){
 
   const feedback = document.createElement('div');
 
-  q.choices.forEach(c => {
+  const choiceTexts = fmtChoicesDistinct(q.choices);
+  const answerIdx = q.choices.indexOf(q.answer);
+  const answerText = choiceTexts[answerIdx];
+
+  q.choices.forEach((c, idx) => {
     const b = document.createElement('button');
     b.className = 'choice-btn';
-    b.textContent = fmtChoice(c);
+    b.textContent = choiceTexts[idx];
     b.onclick = () => {
       if(state.answered) return;
       state.answered = true;
-      const isCorrect = c === q.answer;
+      const isCorrect = idx === answerIdx;
       [...choicesEl.children].forEach(ch => ch.disabled = true);
       if(isCorrect){
         b.classList.add('correct');
         state.correct++;
       } else {
         b.classList.add('wrong');
-        [...choicesEl.children].forEach(ch => { if(ch.textContent === fmtChoice(q.answer)) ch.classList.add('correct'); });
+        choicesEl.children[answerIdx].classList.add('correct');
       }
       feedback.className = 'feedback ' + (isCorrect ? 'ok' : 'ng');
-      feedback.textContent = (isCorrect ? '正解。' : '不正解。正解は' + fmtChoice(q.answer) + '。') + (q.note ? ' ' + q.note : '');
+      feedback.textContent = (isCorrect ? '正解。' : '不正解。正解は' + answerText + '。') + (q.note ? ' ' + q.note : '');
       app.appendChild(feedback);
       const kakomoLines = isCorrect
         ? ['さすがです、正解でございます。', 'その通りでございます。']
